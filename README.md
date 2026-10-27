@@ -51,6 +51,7 @@ cp .env.example .env
 Edit `.env`:
 ```
 ANTHROPIC_API_KEY=your-key
+LANGSMITH_API_KEY_GATEWAY=your-gateway-key
 LANGSMITH_API_KEY=your-demo-workspace-api-key
 LANGSMITH_PROJECT=chat-lc-lite
 LANGSMITH_WORKSPACE_ID=your-demo-workspace-id
@@ -174,6 +175,10 @@ Two LLM-as-judge evaluators run in CI (offline). Claude Haiku scores each 0 or 1
 ## Online Evaluators
 
 Online evaluators run automatically on every trace as it arrives in LangSmith. This gives Engine a continuous signal on live traffic, not just offline evals on a fixed dataset.
+
+Before registering online evaluators, create the workspace secret `LANGSMITH_API_KEY_GATEWAY` in LangSmith workspace settings with a valid gateway credential. Both registration paths serialize `anthropic_api_key` as `{"lc": 1, "type": "secret", "id": ["LANGSMITH_API_KEY_GATEWAY"]}` and use `https://gateway.smith.langchain.com/anthropic` with `claude-haiku-4-5-20251001`. Setting the local environment variable alone does not provision this hosted secret; a direct `ANTHROPIC_API_KEY` does not satisfy this gateway configuration. Keep actual credentials out of serialized rules.
+
+Setup sends a smoke-test trace after registration and requires non-null `security_advice` feedback (0 or 1); errored feedback or a timeout fails setup. After configuring the secret, re-run setup to replace existing rules and check subsequent traces for scored feedback without authentication errors.
 
 Six online evaluators are registered by `python -m scripts.setup`: `security_advice`, `scope_adherence`, `tool_usage`, `response_completeness`, `professional_tone`, and `factual_accuracy`.
 
