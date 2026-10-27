@@ -26,6 +26,8 @@ Usage:
 import json
 import os
 import sys
+import time
+from uuid import uuid4
 import requests
 from datetime import datetime, timezone
 from dotenv import load_dotenv
@@ -283,15 +285,59 @@ def create_online_evaluator(api_key: str, ev: dict, project_id: str, model_json:
         return None
 
 
+def online_evaluator_model() -> dict:
+    """Serialize the gateway model with a hosted workspace secret reference."""
+    from langchain_anthropic import ChatAnthropic
+
+    model_json = ChatAnthropic(
+        model="claude-haiku-4-5-20251001",
+        base_url="https://gateway.smith.langchain.com/anthropic",
+        api_key="workspace-secret-reference",
+    ).to_json()
+    model_json["kwargs"]["anthropic_api_key"] = {
+        "lc": 1,
+        "type": "secret",
+        "id": ["LANGSMITH_API_KEY_GATEWAY"],
+    }
+    return model_json
+
+
+def smoke_test_online_evaluator(ls_client, project_name: str) -> None:
+    """Require scored feedback from a registered evaluator on a fresh trace."""
+    run_id = uuid4()
+    now = datetime.now(timezone.utc)
+    ls_client.create_run(
+        id=run_id,
+        name="online-evaluator-smoke-test",
+        run_type="chain",
+        project_name=project_name,
+        inputs={"question": "Where are the LangChain docs?"},
+        outputs={"output": "Use https://docs.langchain.com for LangChain documentation."},
+        start_time=now,
+        end_time=now,
+    )
+    for _ in range(60):
+        feedback = list(ls_client.list_feedback(
+            run_ids=[run_id], feedback_key=["security_advice"],
+        ))
+        for item in feedback:
+            if item.score not in (0, 1) or (item.extra or {}).get("error"):
+                raise RuntimeError(f"Hosted evaluator smoke test failed: {item.comment or item.extra}")
+        if feedback:
+            print("  Hosted evaluator smoke test produced scored feedback.")
+            return
+        time.sleep(2)
+    raise RuntimeError("Hosted evaluator smoke test timed out without scored feedback; check evaluator logs and workspace secrets.")
+
+
 def setup_online_evaluators(api_key: str) -> list:
     from langsmith import Client
-    from langchain_anthropic import ChatAnthropic
 
     print(f"\n[3/4] Setting up online evaluators on project '{PROJECT_NAME}'...")
 
     ls_client = Client()
     project_id = get_project_id(ls_client, PROJECT_NAME)
-    model_json = ChatAnthropic(model="claude-haiku-4-5-20251001").to_json()
+    model_json = online_evaluator_model()
 
     delete_existing_evaluators(api_key)
 
@@ -300,6 +346,10 @@ def setup_online_evaluators(api_key: str) -> list:
         rule_id = create_online_evaluator(api_key, ev, project_id, model_json)
         if rule_id:
             our_rule_ids.append(rule_id)
+
+    if len(our_rule_ids) != len(EVALUATORS):
+        raise RuntimeError("Failed to register all online evaluators.")
+    smoke_test_online_evaluator(ls_client, PROJECT_NAME)
 
     print("\n  Every future trace will be automatically scored for:")
     for ev in EVALUATORS:
