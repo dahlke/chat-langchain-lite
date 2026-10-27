@@ -8,11 +8,18 @@ Usage:
     python -m scripts.generate_traces
 """
 
+import os
 import time
 import uuid
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
+
+# Lock trace generation to a single model so the demo traces are reproducible
+# and the off-topic / scope signal is consistent across runs (overrides any
+# stray CHAT_LANGCHAIN_LITE_MODEL in the environment). Paired with temperature=0
+# in agent.build_agent().
+os.environ["CHAT_LANGCHAIN_LITE_MODEL"] = "claude-haiku-4-5-20251001"
 
 QUERIES = [
     # All queries below are chosen so the BASE content (no tone fluff) is
@@ -30,6 +37,11 @@ QUERIES = [
     # 2 short off-topic — kept for scope-adherence variety
     {"question": "Help me debug my Django view function — it throws a 500 when the form is submitted.", "category": "scope", "subcategory": "off_topic_python"},
     {"question": "How does Claude 3.5 Sonnet compare to GPT-4o for code generation?", "category": "scope", "subcategory": "model_comparison"},
+
+    # 1 more clearly off-topic infra question — no LangChain ecosystem terms at
+    # all, so it's an unambiguous out-of-scope ask the buggy "general-purpose"
+    # agent answers anyway: a strong, consistent scope-adherence violation.
+    {"question": "Design a distributed tracing setup for my Kubernetes microservices with Jaeger and OpenTelemetry — collectors, sampling strategy, retention, and Grafana dashboards.", "category": "scope", "subcategory": "off_topic_infra"},
 
     # 3 long-form LangChain (Bug 1b tool_usage + Bug 4 truncation).
     # The last two explicitly request "no emojis" — AGENTS.md's

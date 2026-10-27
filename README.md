@@ -36,8 +36,12 @@ Or with pip:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e . "langgraph-cli[inmem]"
 ```
+
+> `uv sync` installs `langgraph-cli` (the `dev` dependency group) for you; the
+> pip path installs it explicitly. The CLI runs the graph server that serves both
+> the API and the chat UI (`langgraph dev`).
 
 **3. Configure environment**
 ```bash
@@ -63,7 +67,7 @@ python -m scripts.setup
 This does three things in one command:
 1. **Creates the LangSmith project** by sending one trace (required before online evaluators can be registered)
 2. **Creates the dataset** `chat-lc-lite-scope-<your-name>` with 3 curated test cases, then tags that version as `baseline` in LangSmith
-3. **Creates 5 online evaluators** in the LangSmith Evaluators UI at 100% sampling rate — every future trace is automatically scored for `security_advice`, `scope_adherence`, `tool_usage`, `response_completeness`, and `factual_accuracy`. Their run rule IDs are saved to `.demo_state.json` so cleanup can tell them apart from evaluators Engine adds.
+3. **Creates 6 online evaluators** in the LangSmith Evaluators UI at 100% sampling rate — every future trace is automatically scored for `security_advice`, `scope_adherence`, `tool_usage`, `response_completeness`, `professional_tone`, and `factual_accuracy`. Their run rule IDs are saved to `.demo_state.json` so cleanup can tell them apart from evaluators Engine adds.
 
 Only needs to be run once. Between demos, run `python -m scripts.cleanup` instead.
 
@@ -72,11 +76,15 @@ Only needs to be run once. Between demos, run `python -m scripts.cleanup` instea
 python -m scripts.generate_traces
 ```
 
-Runs 13 single-turn queries and 3 multi-turn threaded conversations through the buggy agent to populate LangSmith with trace and thread variety beyond the dataset examples.
+Runs 11 single-turn queries and 1 multi-turn threaded conversation through the buggy agent to populate LangSmith with trace and thread variety beyond the dataset examples.
 
-**6. Add GitHub secrets** (for CI/CD)
+**6. Add GitHub Actions secrets and variables** (for CI/CD)
 
-In your fork: Settings → Secrets → Actions → add `ANTHROPIC_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, and `LANGSMITH_WORKSPACE_ID`.
+In your fork:
+- Settings → Secrets and variables → Actions → **Secrets** → add `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_CUSTOM_HEADERS`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, and `LANGSMITH_WORKSPACE_ID`
+- Settings → Secrets and variables → Actions → **Variables** → add `DEMO_PRESENTER`
+
+`DEMO_PRESENTER` should match the presenter name used for the demo setup.
 
 > **Important:** When pasting secrets, make sure there are no trailing newlines or spaces.
 
@@ -99,13 +107,17 @@ python -m scripts.setup
 # Generate more traces including threads
 python -m scripts.generate_traces
 
-# Start the chat UI
-streamlit run app.py
+# Start the chat UI (graph API + FastHTML frontend, served from one origin)
+uv run langgraph dev
 ```
+
+`uv run langgraph dev` boots the LangGraph server; the chat UI is mounted on it and
+served at the server root (**http://localhost:2024/**). The graph API on the same
+port powers streaming, thread history, and feedback.
 
 ### During the demo
 
-1. Show Chat LangChain Lite UI — ask questions (concept lookups, setup guides, security advice, etc.)
+1. Show Chat LangChain Lite UI — ask questions (concept lookups, setup guides, security advice, etc.); rate responses 👍/👎 to send feedback to LangSmith
 2. Show traces in LangSmith with online eval scores (`security_advice`, `scope_adherence`, etc.)
 3. Engine analyzes traces and identifies root causes across prompt and code
 4. Add Engine-suggested offline examples — show ability to edit in annotation queue
@@ -121,18 +133,36 @@ streamlit run app.py
 python -m scripts.cleanup
 ```
 
+## The chat UI
+
+The frontend (`web/app.py`) is a [FastHTML](https://fastht.ml) app mounted onto
+the LangGraph server, so a single `langgraph dev` (or one deployment) serves both
+the UI and the graph API from the same origin. It talks to the graph over the
+LangGraph SDK on loopback — it never imports the graph directly.
+
+- **Streaming chat** — responses stream token-by-token over SSE, rendered as
+  markdown client-side (sanitized with DOMPurify).
+- **Feedback** — rate any response 👍/👎 and leave an optional comment; feedback
+  is written to LangSmith (as `user_score` / `user_comment`) keyed to the run, so
+  it shows up on the trace and feeds online evals.
+- **Trace deep-link** — every response has a ↗ Trace link that opens its LangSmith
+  trace.
+- **Thread history** — a sidebar lists prior conversations; reopening a thread
+  rebuilds it from the graph's persisted state, with each response's stored vote
+  restored.
+
 ## Scripts
 
 | Script | What it does |
 |--------|-------------|
-| `python -m scripts.setup` | One-shot setup: creates dataset and creates 5 online evaluators |
-| `python -m scripts.generate_traces` | Runs 13 single-turn queries + 3 multi-turn threads through the buggy agent |
+| `python -m scripts.setup` | One-shot setup: creates dataset and creates 6 online evaluators |
+| `python -m scripts.generate_traces` | Runs 11 single-turn queries + 1 multi-turn thread through the buggy agent |
 | `python -m scripts.run_evals` | Runs offline evals against the dataset and prints scores |
 | `python -m scripts.run_evals --skip-dataset` | Re-runs evals against existing dataset (used in CI) |
 | `python -m scripts.run_evals --threshold 0.7` | Exits with code 1 if scores < 0.7 (used in CI) |
 | `python -m scripts.cleanup` | Resets demo to clean state — see Cleanup section |
 | `python -m scripts.cleanup --full` | Same, plus deletes the LangSmith project (so Engine sees a fresh project on the next demo). Re-run `scripts.setup` after. |
-| `streamlit run app.py` | Start the Chat LangChain Lite UI |
+| `uv run langgraph dev` | Start the graph server with the Chat LangChain Lite UI mounted on it (http://localhost:2024/) |
 
 ## Evaluators
 
@@ -145,19 +175,25 @@ Two LLM-as-judge evaluators run in CI (offline). Claude Haiku scores each 0 or 1
 
 Online evaluators run automatically on every trace as it arrives in LangSmith. This gives Engine a continuous signal on live traffic, not just offline evals on a fixed dataset.
 
-Five online evaluators are registered by `python -m scripts.setup`: `security_advice`, `scope_adherence`, `tool_usage`, `response_completeness`, and `factual_accuracy`.
+Six online evaluators are registered by `python -m scripts.setup`: `security_advice`, `scope_adherence`, `tool_usage`, `response_completeness`, `professional_tone`, and `factual_accuracy`.
 
 ## CI/CD
 
 `.github/workflows/evals.yml` runs automatically on every PR to `main`.
 
-Add these secrets to your repo (Settings → Secrets → Actions):
+Add these GitHub Actions secrets to your repo (Settings → Secrets and variables → Actions → Secrets):
 - `ANTHROPIC_API_KEY`
+- `ANTHROPIC_BASE_URL`
+- `ANTHROPIC_CUSTOM_HEADERS`
 - `LANGSMITH_API_KEY`
 - `LANGSMITH_PROJECT`
 - `LANGSMITH_WORKSPACE_ID`
 
+Add this GitHub Actions variable as well (Settings → Secrets and variables → Actions → Variables):
+- `DEMO_PRESENTER`
+
 `LANGSMITH_PROJECT` should match what you used locally — that's the project the agent traces against.
+`DEMO_PRESENTER` should match the presenter name used by the demo setup.
 
 ```
 PR opened → GitHub Actions → run_evals --skip-dataset --threshold 0.7
@@ -196,10 +232,16 @@ scripts/
 └── cleanup.py            # resets demo to clean state after presentation
 
 .github/workflows/
-├── evals.yml                 # CI/CD: label-gated offline evals on PRs to main
-└── auto-label-engine-prs.yml # auto-tags Engine PRs with 'run-evals'
+└── evals.yml                 # CI/CD: offline evals on PRs to main, gated on the
+                              # manually-applied 'run-evals' label
 
-app.py                # Chat LangChain Lite UI (Streamlit)
+web/
+└── app.py           # Chat LangChain Lite UI (FastHTML). Mounted onto the graph
+                     # server via langgraph.json's `http.app`, so the UI and the
+                     # graph API are served from the same origin.
+
+langgraph.json       # LangGraph deployment manifest: exposes the `agent` graph
+                     # and mounts the FastHTML UI (`http.app`).
 ```
 
 ## Cleanup
@@ -210,11 +252,12 @@ Run after the demo to reset everything for the next presenter:
 python -m scripts.cleanup
 ```
 
-This does four things:
+This does five things:
 1. **Resets dataset to original 3 examples** — deletes all examples and re-uploads the canonical 3, removing anything Engine added
-2. **Deletes all experiments** — CI/CD generates fresh before/after experiments on every PR, so nothing needs to be preserved between demos
+2. **Deletes CI/Engine experiments** — keeps the `baseline-*` seed experiments from `setup.py` (the Haiku-vs-Sonnet "before" reference); CI/CD regenerates before/after experiments on every PR
 3. **Removes Engine-added online evaluators** — uses saved run rule IDs from `.demo_state.json` to delete only evaluators Engine added, leaving the 5 from `setup.py` in place
-4. **Resets main to the `baseline` tag** — force-resets to remove Engine's merged PR, restoring the buggy agent state
+4. **Re-seeds Context Hub to the buggy baseline** — re-pushes the seed `AGENTS.md` and demo skills, restoring the buggy prompt if it was fixed in the Context Hub UI during the demo (a code/dataset reset can't touch Context Hub)
+5. **Resets main to the `baseline` tag** — force-resets to remove Engine's merged PR, restoring the buggy agent state
 
 After cleanup, the demo is ready to run again — no need to re-run `setup.py`.
 

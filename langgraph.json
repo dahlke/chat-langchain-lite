@@ -1,0 +1,10 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "chat_langchain_lite": "./agent/agent.py:build_agent"
+  },
+  "env": ".env",
+  "http": {
+    "app": "./web/app.py:app"
+  }
+}

@@ -2,9 +2,11 @@
 
 Resets the demo to a clean state so it can be run again without re-running setup:
   1. Resets dataset to the original 3 examples (deletes Engine-added examples)
-  2. Deletes all experiments — CI/CD generates fresh before/after on every PR
+  2. Deletes CI/Engine experiments (keeps the baseline-* seeds from setup.py)
   3. Removes Engine-added online evaluators (keeps the 5 registered by setup.py)
-  4. Force-resets main back to the 'baseline' tag (removes Engine's merged PR)
+  4. Re-seeds Context Hub (AGENTS.md + demo skills) to the buggy baseline,
+     restoring the prompt if it was fixed in the Context Hub UI during the demo
+  5. Force-resets main back to the 'baseline' tag (removes Engine's merged PR)
 
 Optional: --full also deletes the LangSmith project entirely (clears all
 traces and Engine's per-project issue state). After a full reset, re-run
@@ -69,22 +71,30 @@ def reset_dataset() -> None:
 # ── 2. Delete 'after' experiments ─────────────────────────────────────────────
 
 def delete_ci_experiments() -> None:
-    """Delete all experiments linked to the dataset.
+    """Delete CI/Engine experiments linked to the dataset.
 
-    CI/CD generates fresh before/after experiments on every PR, so there is
-    no experiment worth keeping between demos.
+    CI/CD generates fresh before/after experiments on every PR, so those are
+    not worth keeping between demos. The `baseline-*` experiments seeded by
+    setup.py ARE preserved: they're the demo's Haiku-vs-Sonnet "before"
+    reference and would otherwise have to be reseeded after every cleanup.
     """
     from langsmith import Client
 
-    print(f"\n[2/3] Removing all experiments from demo datasets...")
+    print(f"\n[2/3] Removing CI/Engine experiments (keeping baseline seeds)...")
     ls_client = Client()
     total_deleted = 0
+    total_kept = 0
     for name in (DATASET_NAME, TOOL_ADHERENCE_DATASET_NAME):
         datasets = list(ls_client.list_datasets(dataset_name=name))
         if not datasets:
             continue
         experiments = list(ls_client.list_projects(reference_dataset_id=datasets[0].id))
         for exp in experiments:
+            # Preserve the baseline-* seeds setup.py creates (the Haiku/Sonnet
+            # "before" reference); only sweep CI/Engine experiments.
+            if exp.name.startswith("baseline-"):
+                total_kept += 1
+                continue
             for attempt in range(3):
                 try:
                     ls_client.delete_project(project_name=exp.name)
@@ -97,7 +107,7 @@ def delete_ci_experiments() -> None:
                     else:
                         print(f"  Failed to delete '{exp.name}': {e}")
                         break
-    print(f"  Deleted {total_deleted} experiment(s) across both datasets.")
+    print(f"  Deleted {total_deleted} experiment(s), kept {total_kept} baseline seed(s).")
 
 
 # ── 3. Delete Engine-added online evaluators ───────────────────────────────────
@@ -162,11 +172,14 @@ def delete_engine_evaluators(api_key: str) -> None:
 # ── Optional: delete the entire LangSmith project ─────────────────────────────
 
 def delete_project() -> None:
-    """Delete project + datasets + every chat-lc-lite-* Context Hub repo.
+    """Delete this presenter's project + datasets + Context Hub repo.
 
     Removes all traces, online evaluators on the project, Engine issue state,
-    both demo datasets, and any Context Hub agent / skill whose handle starts
-    with `chat-lc-lite-` (sweep catches leftovers from prior renames).
+    both demo datasets, and the presenter's Context Hub agent repo.
+
+    Datasets and Context Hub repos are matched by the `-<presenter>` suffix
+    so running `--full` in a shared LangSmith workspace never deletes another
+    demoer's resources.
     """
     from langsmith import Client
 
@@ -210,9 +223,14 @@ def delete_project() -> None:
         except Exception as e:
             print(f"  Dataset delete failed for '{d.name}': {e}")
 
-    # 3. Context Hub — sweep every chat-lc-lite-* agent and skill (catches
-    # the current ones plus any leftovers from prior renames).
-    print(f"\n[*] Deleting Context Hub repos (chat-lc-lite-* sweep)...")
+    # 3. Context Hub — delete only THIS presenter's repos. The agent repo is
+    # `chat-lc-lite-agent-<presenter>`, so the same `chat-lc-lite-*` +
+    # `-<presenter>` suffix match used for datasets above scopes this safely.
+    # The bare `chat-lc-lite-` prefix and the hardcoded generic skill handles
+    # (release-notes-skill, etc.) are deliberately NOT used: those handles are
+    # seeded un-scoped in utils/context_hub.py and would delete other demoers'
+    # identically-named repos in a shared workspace.
+    print(f"\n[*] Deleting Context Hub repos (presenter '{DEMO_PRESENTER}')...")
     api_key = os.environ.get("LANGSMITH_API_KEY", "")
     workspace_id = os.environ.get("LANGSMITH_WORKSPACE_ID", "")
     H = {"x-api-key": api_key}
@@ -227,7 +245,7 @@ def delete_project() -> None:
             continue
         for repo in r.json().get("repos", []):
             handle = repo.get("repo_handle", "")
-            if handle.startswith("chat-lc-lite-") or handle in {"release-notes-skill", "support-ticket-triage-skill", "pr-review-summary-skill"}:
+            if handle.startswith("chat-lc-lite-") and handle.endswith(presenter_suffix):
                 try:
                     delete_fn(handle)
                     print(f"  Deleted {repo_type} '{handle}'.")
@@ -307,6 +325,29 @@ def reset_main_to_baseline() -> None:
         print(f"  Warning: reset failed ({result.stderr.strip()}).")
 
 
+# ── Re-seed Context Hub ───────────────────────────────────────────────────────
+
+def reset_context_hub() -> None:
+    """Re-seed Context Hub (AGENTS.md + demo skills) back to the buggy baseline.
+
+    Standard cleanup resets code, dataset, and experiments — but the agent's
+    system prompt lives in Context Hub and is edited via the UI during the demo.
+    If a presenter applied the prompt fix live, this restores the buggy seed so
+    the next demo starts clean. Re-pushing overwrites any edited AGENTS.md; the
+    seed content is owned by utils/context_hub.py (the same source setup.py uses).
+
+    Not called by --full, which deletes the Hub repos for a clean-slate re-setup.
+    """
+    from utils.context_hub import push_agents_md, push_demo_skills
+
+    print(f"\n[*] Resetting Context Hub to seed (AGENTS.md + demo skills)...")
+    try:
+        push_agents_md()
+        push_demo_skills()
+    except Exception as e:
+        print(f"  Context Hub reset failed (non-fatal): {e}")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -340,6 +381,7 @@ def main():
         reset_dataset()
         delete_ci_experiments()
         delete_engine_evaluators(api_key)
+        reset_context_hub()
     reset_main_to_baseline()
 
     if args.full:

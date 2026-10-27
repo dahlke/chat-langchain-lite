@@ -22,6 +22,11 @@ def get_prompt() -> str:
     Returns an empty string if the hub is unreachable or the repo hasn't
     been seeded yet — run `python -m scripts.setup` to initialize it.
     """
+    # The AGENTS.md served from Context Hub is initially populated from THIS
+    # repo — see utils/context_hub.py (`_SEED_AGENTS_MD`), pushed to the hub by
+    # `scripts/setup.py`. So the agent's instructions have a repo-side source of
+    # truth: a fix to the prompt can be applied BOTH as a PR to that seed file
+    # AND by updating the live Context Hub repo (`CONTEXT_HUB_REPO`).
     try:
         return Client().pull_agent(CONTEXT_HUB_REPO).files["AGENTS.md"].content
     except Exception:

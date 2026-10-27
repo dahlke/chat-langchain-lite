@@ -9,3 +9,11 @@ __pycache__/
 dist/
 build/
 .pytest_cache/
+
+# langgraph dev local state
+.langgraph_api/
+.sesskey
+.claude/
+
+# superpowers docs
+docs/

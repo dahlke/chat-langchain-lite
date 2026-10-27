@@ -137,7 +137,7 @@ def setup_online_eval():
                     "structured": {
                         "prompt": [
                             ["system", ev["system_prompt"]],
-                            ["human", "Agent response: {output}"],
+                            ["human", "Agent response: {{output}}"],
                         ],
                         "variable_mapping": {"output": "output"},
                         "model": model_json,

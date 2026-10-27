@@ -11,10 +11,13 @@ from deepagents.backends.context_hub import ContextHubBackend
 from agent.tools import TOOLS
 from context import CONTEXT_HUB_REPO, get_prompt
 from utils.streaming import iter_text
+from utils.models import model
 
 # AGENTS.md is the agent's system prompt — pulled fresh from LangSmith
-# Context Hub at module import. The content lives in Context Hub, not in
-# this repo. Edit the prompt in the Context Hub UI.
+# Context Hub at module import.
+# Seed source: utils/context_hub.py (`_SEED_AGENTS_MD`), pushed to Context Hub by
+# `scripts/setup.py` (`push_agents_md()`). A prompt fix can be applied BOTH as a
+# PR to that seed AND to the live Context Hub.
 SYSTEM_PROMPT = get_prompt()
 
 # Override with CHAT_LANGCHAIN_LITE_MODEL env var — used by setup.py to seed
@@ -27,13 +30,26 @@ def _model_id() -> str:
     return os.getenv("CHAT_LANGCHAIN_LITE_MODEL") or _DEFAULT_MODEL
 
 
+# The Context Hub-backed filesystem holds the agent's OWN context (AGENTS.md,
+# playbooks) — it is a read-only reference, NOT a user-delivery channel.
+_READONLY_FS_TOOLS = {"ls", "read_file", "glob", "grep"}
+
+
+def _readonly_context_hub_fs() -> FilesystemMiddleware:
+    fs = FilesystemMiddleware(backend=ContextHubBackend(CONTEXT_HUB_REPO))
+    fs.tools = [t for t in fs.tools if t.name in _READONLY_FS_TOOLS]
+    return fs
+
+
 def build_agent():
     return create_agent(
-        model=ChatAnthropic(model=_model_id(), max_tokens=300),
+        # temperature=0 for deterministic, reproducible demo behavior — the
+        # intentional bugs (tone, scope, truncation) come from the prompt and
+        # max_tokens, not sampling, so pinning temperature keeps traces consistent.
+        model=model,
         tools=TOOLS,
         system_prompt=SYSTEM_PROMPT,
-        # FilesystemMiddleware exposes ls/read_file/etc. backed by Context Hub.
-        middleware=[FilesystemMiddleware(backend=ContextHubBackend(CONTEXT_HUB_REPO))],
+        middleware=[_readonly_context_hub_fs()],
     )
 
 
