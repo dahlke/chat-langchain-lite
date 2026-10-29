@@ -177,6 +177,70 @@ def setup_dataset() -> str:
     return DATASET_NAME
 
 
+def attach_resources_to_agent(api_key: str) -> None:
+    """Attach the demo's dataset and Context Hub repos to the agent.
+
+    In an agent-based workspace, tracing to PROJECT_NAME auto-creates an agent
+    with that identifier. Datasets, Context Hub agents, and skills show under
+    that agent only when tagged with its "Agent" resource tag; experiments on
+    the dataset follow it. Project-based workspaces have no agents, so this is
+    a no-op there.
+    """
+    from langsmith import Client
+    from context import CONTEXT_HUB_REPO
+    from utils.context_hub import _DEMO_SKILLS
+
+    base = "https://api.smith.langchain.com/api/v1"
+    resp = requests.get(f"{base}/agents/{PROJECT_NAME}", headers=_ls_headers(api_key))
+    if resp.status_code == 404:
+        print(f"  No agent '{PROJECT_NAME}' (project-based workspace). Skipping attach.")
+        return
+    resp.raise_for_status()
+    tag_value_id = resp.json().get("tag_value_id")
+    if not tag_value_id:
+        print(f"  Agent '{PROJECT_NAME}' has no tag to attach resources to. Skipping.")
+        return
+
+    # (resource_type, name, id) for everything the demo shows under the agent
+    resources = [("dataset", DATASET_NAME, str(Client().read_dataset(dataset_name=DATASET_NAME).id))]
+    wanted = {("agent", CONTEXT_HUB_REPO), *(("skill", s) for s in _DEMO_SKILLS)}
+    for repo_type in ("agent", "skill"):
+        r = requests.get(
+            f"https://api.smith.langchain.com/v1/platform/hub/repos?repo_type={repo_type}",
+            headers=_ls_headers(api_key),
+        )
+        r.raise_for_status()
+        for repo in r.json().get("repos", []):
+            if (repo_type, repo.get("repo_handle")) in wanted:
+                resources.append((repo_type, repo["repo_handle"], repo["id"]))
+
+    existing = requests.get(
+        f"{base}/workspaces/current/taggings",
+        headers=_ls_headers(api_key),
+        params={"tag_value_id": tag_value_id},
+    )
+    existing.raise_for_status()
+    attached = {
+        item["resource_id"]
+        for tagging in existing.json()
+        for items in tagging.get("resources", {}).values()
+        for item in items
+    }
+
+    print(f"\n[*] Attaching demo resources to agent '{PROJECT_NAME}'...")
+    for resource_type, name, resource_id in resources:
+        if resource_id in attached:
+            print(f"  Already attached: {resource_type} '{name}'")
+            continue
+        resp = requests.post(
+            f"{base}/workspaces/current/taggings",
+            headers=_ls_headers(api_key, json_body=True),
+            json={"tag_value_id": tag_value_id, "resource_type": resource_type, "resource_id": resource_id},
+        )
+        resp.raise_for_status()
+        print(f"  Attached {resource_type} '{name}'")
+
+
 # ── Online evaluators ──────────────────────────────────────────────────────────
 
 def get_project_id(ls_client, project_name: str) -> str:
@@ -362,6 +426,7 @@ def main():
     push_demo_skills()
     ensure_project_exists()
     setup_dataset()
+    attach_resources_to_agent(api_key)
     our_rule_ids = setup_online_evaluators(api_key)
 
     # Save state so cleanup can distinguish setup resources from Engine-added ones

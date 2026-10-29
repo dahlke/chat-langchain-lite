@@ -58,6 +58,8 @@ LANGSMITH_TRACING=true
 ```
 
 > If multiple presenters share a LangSmith workspace, use a unique `LANGSMITH_PROJECT` per person (e.g. `chat-lc-lite-morgan`) to avoid mixing traces and online evaluators. The project is created automatically on first use.
+>
+> In an agent-based LangSmith workspace, the first trace creates an agent whose ID matches `LANGSMITH_PROJECT`, and the traces land in its Production environment. `scripts.setup` attaches the demo resources to that agent (the eval dataset and its experiments, the Context Hub AGENTS.md repo, and the demo skills), so they show up under the agent without being added by hand. The online evaluators already run on the agent's Production environment.
 
 **4. Run one-shot setup**
 ```bash
