@@ -28,6 +28,7 @@ import logging
 import os
 import re
 import secrets
+import subprocess
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
@@ -64,6 +65,18 @@ from starlette.responses import PlainTextResponse, RedirectResponse
 from context import CONTEXT_HUB_REPO
 
 load_dotenv(override=True)
+
+_REVISION_ID = os.environ.get("LANGSMITH_REVISION_ID")
+if not _REVISION_ID:
+    try:
+        _REVISION_ID = subprocess.check_output(
+            ["git", "describe", "--tags", "--always"],
+            cwd=Path(__file__).resolve().parent.parent,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        _REVISION_ID = None
 
 ASSISTANT_ID = "chat_langchain_lite"
 
@@ -848,6 +861,9 @@ async def send(session, q: str = ""):
     if not q:
         return ""
     thread_id = session["thread"]
+    metadata = {"demo": "true", "demo_type": APP_SLUG}
+    if _REVISION_ID:
+        metadata["revision_id"] = _REVISION_ID
     # Create the run ONCE here. The assistant bubble then joins this run's stream
     # over SSE, so EventSource reconnects re-attach instead of starting new runs.
     try:
@@ -862,7 +878,7 @@ async def send(session, q: str = ""):
             stream_mode="messages-tuple",
             stream_resumable=True,
             if_not_exists="create",
-            metadata={"demo": "true", "demo_type": APP_SLUG},
+            metadata=metadata,
             config={
                 "run_name": f"{APP_SLUG}-demo",
                 "tags": ["engine-demo", CONTEXT_HUB_REPO],
