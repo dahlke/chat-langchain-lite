@@ -108,6 +108,7 @@ Build changes in a fork, test them in your own LangSmith workspace, then open a 
    - creates the `maintainers` environment, so the Reset and Teardown workflows wait for your approval
    - turns on issues, where the Health workflow reports problems
    - publishes Pages and runs `demo:prepare`, creating the Engine board on production after its traffic so the first scan has traces to read (see [Engine fix verification](#engine-fix-verification))
+   - points the board at the Slack channel and Linear project in `agent/.env`, if any, and copies them to repo variables (see [Engine in Slack and Linear](#engine-in-slack-and-linear))
 
    Re-running skips what's done, but updates the deployments' secrets when they change; `--redeploy` rebuilds both environments. A workspace whose environments were deployed with the mda CLI needs `--replace` once: it deletes them and creates them again from GitHub, keeping their tracing projects and rules.
 4. Your app is at `https://<you>.github.io/<repo>/`.
@@ -131,6 +132,15 @@ Fix verification needs the `enable_engine_issue_validation` flag on the workspac
 
 Engine's fix PRs can't be merged: the `merge-guard` check stays pending on them. Show the verdict instead.
 
+### Engine in Slack and Linear
+
+Engine can post each new issue and fix PR to a Slack channel, and file each issue as a Linear ticket. Both are optional and set in `agent/.env`:
+
+- `ENGINE_SLACK_CHANNEL`: a public channel in a Slack workspace connected to the LangSmith org.
+- `ENGINE_LINEAR_TEAM` and, optionally, `ENGINE_LINEAR_PROJECT`: the team's key and a project name. First connect Linear in the Engine board's settings in LangSmith; only the UI can.
+
+Install and Reset point the board at them; Health checks it does. Deleting the board deletes its Linear connection, so after a Reset, connect Linear again and re-run `mise run demo:install`. Health fails until you do.
+
 ## Keeping the demo running
 
 Once installed, GitHub Actions keep the demo ready. They use the `LANGSMITH_API_KEY` repo secret; for a shared demo, make it a service key with the Editor role on the demo's workspace only.
@@ -138,8 +148,8 @@ Once installed, GitHub Actions keep the demo ready. They use the `LANGSMITH_API_
 | Workflow | When | What it does |
 |---|---|---|
 | Trickle | Every 4 hours | A few conversations with production, some with a follow-up and feedback, so there are always recent traces and evidence for Engine |
-| Health | Daily | Checks the deployments, sign-in, Pages, the tone judge, Engine and the schedules. While anything fails, one issue labeled `demo-health` stays open |
-| Reset | By hand, after approval | Closes Engine's fix PRs, replaces its board, sends traffic and refreshes the experiments. `main` and `development` stay as they are |
+| Health | Daily | Checks the deployments, sign-in, Pages, the tone judge, Engine and its Slack and Linear destinations, and the schedules. While anything fails, one issue labeled `demo-health` stays open |
+| Reset | By hand, after approval | Closes Engine's fix PRs, replaces its board with its Slack and Linear destinations, sends traffic and refreshes the experiments. `main` and `development` stay as they are |
 | Teardown | By hand, after approval | Runs `demo:uninstall --yes` |
 | Prepare demo | By hand | Runs `demo:prepare` |
 | Sync Gateway key | By hand, after approval | Copies the `LANGSMITH_GATEWAY_API_KEY` repo secret into both deployments, rebuilding any that change, then runs Health |

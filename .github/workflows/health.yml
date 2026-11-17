@@ -24,6 +24,9 @@ jobs:
     env:
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
       LANGSMITH_WORKSPACE_ID: ${{ vars.LANGSMITH_WORKSPACE_ID }}
+      ENGINE_SLACK_CHANNEL: ${{ vars.ENGINE_SLACK_CHANNEL }}
+      ENGINE_LINEAR_TEAM: ${{ vars.ENGINE_LINEAR_TEAM }}
+      ENGINE_LINEAR_PROJECT: ${{ vars.ENGINE_LINEAR_PROJECT }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7

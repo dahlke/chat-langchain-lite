@@ -1,4 +1,5 @@
 import { ApiError, type Api } from "./api.ts";
+import type { LinearIntegration } from "./engine-integrations.ts";
 
 /** Per-project monthly cap, in LCU. The org has its own cap, shared by every workspace. */
 export const ENGINE_SPEND_LIMIT_LCU = "250";
@@ -13,6 +14,7 @@ export interface EngineBoard {
     readonly repo_url: string;
     readonly base_branch: string | null;
   }[];
+  readonly linear_integration?: LinearIntegration;
 }
 
 export interface EngineTargets {

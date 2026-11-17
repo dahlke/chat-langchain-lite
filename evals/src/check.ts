@@ -5,6 +5,11 @@ import { createApi, type Api } from "./api.ts";
 import { readConfig } from "./config.ts";
 import { findAgentDeployment, PREVIEW_CONFIG, revisionState } from "./deployments.ts";
 import { boardProblems, findBoard } from "./engine.ts";
+import {
+  integrationProblems,
+  readIntegrations,
+  type EngineIntegrations,
+} from "./engine-integrations.ts";
 import { TONE_RULE_NAME } from "./evaluators.ts";
 import { originRepo, run } from "./github.ts";
 import {
@@ -87,6 +92,30 @@ async function engineCheck(api: Api, hostApi: Api, repo: string): Promise<string
   problems.push(...spendProblems(spend));
   if (problems.length > 0) throw new Error(`${problems.join("; ")}. ${describeSpend(spend)}`);
   return `scanning and verifying fixes; ${describeSpend(spend)}`;
+}
+
+async function integrationsCheck(
+  api: Api,
+  hostApi: Api,
+  integrations: EngineIntegrations,
+): Promise<string> {
+  const wanted = [
+    ...(integrations.slackChannel ? [`#${integrations.slackChannel}`] : []),
+    ...(integrations.linear ? [`Linear ${integrations.linear.team}`] : []),
+  ];
+  if (wanted.length === 0) return "none configured";
+  const production = await findAgentDeployment(hostApi, "production");
+  if (!production?.tracer_session_id) throw new Error("production isn't deployed");
+  const board = await findBoard(api, production.tracer_session_id);
+  if (!board) throw new Error("no board on production. Run mise run demo:install");
+  const problems = await integrationProblems(
+    api,
+    production.tracer_session_id,
+    board.linear_integration,
+    integrations,
+  );
+  if (problems.length > 0) throw new Error(problems.join("; "));
+  return `reports to ${wanted.join(" and ")}`;
 }
 
 async function judgeCheck(api: Api, hostApi: Api): Promise<string> {
@@ -212,6 +241,7 @@ async function main() {
   const api = client(config.apiUrl);
   const hostApi = client(config.hostUrl);
   const repo = process.env.GITHUB_REPOSITORY ?? originRepo();
+  const integrations = readIntegrations(process.env);
 
   const results: CheckResult[] = [];
   for (const environment of ENVIRONMENTS) {
@@ -225,6 +255,7 @@ async function main() {
   results.push(
     await check("Tone judge", () => judgeCheck(api, hostApi)),
     await check("Engine", () => engineCheck(api, hostApi, repo)),
+    await check("Engine integrations", () => integrationsCheck(api, hostApi, integrations)),
     await check("Previews", () => previewCheck(hostApi)),
     await check("Pages", () => pagesCheck(repo)),
     await check("Scheduled workflows", () => workflowsCheck(repo)),

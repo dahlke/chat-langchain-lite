@@ -13,6 +13,7 @@ import {
   type EngineTargets,
   type PullRequest,
 } from "./engine.ts";
+import { ensureIntegrations, readIntegrations } from "./engine-integrations.ts";
 import { originRepo, run } from "./github.ts";
 
 const log = (line: string) => console.log(`[reset] ${line}`);
@@ -82,6 +83,8 @@ async function main() {
   // Fresh evidence first: the new board's first scan reads recent production traces.
   prepare(["--only", "traffic"]);
   await ensureBoard(api, targets, log);
+  // Deleting the board deleted its Slack destination and Linear connection.
+  await ensureIntegrations(api, production.tracer_session_id, readIntegrations(process.env), log);
   prepare(["--only", "experiments", "--refresh"]);
   log("done. Engine's issues reappear on the board after its scan, then its fix PRs and verdicts.");
 }

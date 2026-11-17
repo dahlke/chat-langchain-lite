@@ -23,6 +23,11 @@ import {
 } from "./deployments.ts";
 import { ensureBoard } from "./engine.ts";
 import {
+  ensureIntegrations,
+  INTEGRATION_VARIABLES,
+  readIntegrations,
+} from "./engine-integrations.ts";
+import {
   branchProtection,
   MAINTAINERS_ENVIRONMENT,
   maintainersEnvironment,
@@ -215,6 +220,7 @@ async function main() {
     },
   });
   const config = readConfig(process.env);
+  const integrations = readIntegrations(process.env);
   const gatewayKey = process.env.LANGSMITH_GATEWAY_API_KEY;
   if (!gatewayKey)
     throw new Error(
@@ -281,6 +287,16 @@ async function main() {
       "OAUTH_CLIENT_ID is blank in agent/.env, so the app offers only personal access tokens. See the README's Sign in with LangSmith.",
     );
   }
+  // Reset and Health read these to restore and check the board's Slack and Linear destinations.
+  for (const name of INTEGRATION_VARIABLES) {
+    const value = process.env[name]?.trim();
+    if (value) gh(["variable", "set", name, "-R", repo, "--body", value]);
+    else {
+      try {
+        gh(["variable", "delete", name, "-R", repo]);
+      } catch {}
+    }
+  }
   const options: DeployOptions = {
     source,
     secrets: deploymentSecrets({
@@ -309,6 +325,8 @@ async function main() {
   // Traffic before the board: creating it starts a scan, which finds nothing without production traces.
   prepare("readiness,evaluators,triage,app,traffic", "mise run demo:install");
   await ensureBoard(api, { repo, production, development }, log);
+  if (production.tracer_session_id)
+    await ensureIntegrations(api, production.tracer_session_id, integrations, log);
   prepare("experiments", "mise run demo:prepare");
 
   const site = (JSON.parse(gh(["api", `repos/${repo}/pages`])) as { html_url: string }).html_url;

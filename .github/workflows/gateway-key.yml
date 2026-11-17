@@ -23,6 +23,9 @@ jobs:
     env:
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
       LANGSMITH_WORKSPACE_ID: ${{ vars.LANGSMITH_WORKSPACE_ID }}
+      ENGINE_SLACK_CHANNEL: ${{ vars.ENGINE_SLACK_CHANNEL }}
+      ENGINE_LINEAR_TEAM: ${{ vars.ENGINE_LINEAR_TEAM }}
+      ENGINE_LINEAR_PROJECT: ${{ vars.ENGINE_LINEAR_PROJECT }}
       LANGSMITH_GATEWAY_API_KEY: ${{ secrets.LANGSMITH_GATEWAY_API_KEY }}
       GH_TOKEN: ${{ github.token }}
     steps:
